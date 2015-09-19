@@ -1,0 +1,206 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="3.0" xmlns:edmx="http://schemas.microsoft.com/ado/2009/11/edmx">
+  <!-- EF Runtime content -->
+  <edmx:Runtime>
+    <!-- SSDL content -->
+    <edmx:StorageModels>
+    <Schema Namespace="RepCheck.Store" Provider="System.Data.SqlClient" ProviderManifestToken="2012" Alias="Self" xmlns:store="http://schemas.microsoft.com/ado/2007/12/edm/EntityStoreSchemaGenerator" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm/ssdl">
+        <EntityType Name="MissingFile">
+          <Key>
+            <PropertyRef Name="MissingFileID" />
+          </Key>
+          <Property Name="MissingFileID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="ReportID" Type="int" Nullable="false" />
+          <Property Name="ObjectID" Type="varchar" MaxLength="50" Nullable="false" />
+        </EntityType>
+        <EntityType Name="OrphanedFile">
+          <Key>
+            <PropertyRef Name="OrphanedFileID" />
+          </Key>
+          <Property Name="OrphanedFileID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="ReportID" Type="int" Nullable="false" />
+          <Property Name="Path" Type="varchar" MaxLength="500" Nullable="false" />
+          <Property Name="CreationTime" Type="datetime" Nullable="false" />
+        </EntityType>
+        <EntityType Name="RepCheckReport">
+          <Key>
+            <PropertyRef Name="ReportID" />
+          </Key>
+          <Property Name="ReportID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
+          <Property Name="ReportDate" Type="datetime" Nullable="false" />
+          <Property Name="ObjectStoreName" Type="varchar" MaxLength="50" Nullable="false" />
+          <Property Name="DBTime" Type="decimal" Precision="10" Scale="3" Nullable="false" />
+          <Property Name="FSTime" Type="decimal" Precision="10" Scale="3" Nullable="false" />
+          <Property Name="ProcessTime" Type="decimal" Precision="10" Scale="3" Nullable="false" />
+        </EntityType>
+        <Association Name="FK_MissingFile_RepCheckReport">
+          <End Role="RepCheckReport" Type="Self.RepCheckReport" Multiplicity="1" />
+          <End Role="MissingFile" Type="Self.MissingFile" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="RepCheckReport">
+              <PropertyRef Name="ReportID" />
+            </Principal>
+            <Dependent Role="MissingFile">
+              <PropertyRef Name="ReportID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_OrphanedFile_RepCheckReport">
+          <End Role="RepCheckReport" Type="Self.RepCheckReport" Multiplicity="1" />
+          <End Role="OrphanedFile" Type="Self.OrphanedFile" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="RepCheckReport">
+              <PropertyRef Name="ReportID" />
+            </Principal>
+            <Dependent Role="OrphanedFile">
+              <PropertyRef Name="ReportID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <EntityContainer Name="RepCheckStoreContainer">
+          <EntitySet Name="MissingFile" EntityType="Self.MissingFile" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="OrphanedFile" EntityType="Self.OrphanedFile" Schema="dbo" store:Type="Tables" />
+          <EntitySet Name="RepCheckReport" EntityType="Self.RepCheckReport" Schema="dbo" store:Type="Tables" />
+          <AssociationSet Name="FK_MissingFile_RepCheckReport" Association="Self.FK_MissingFile_RepCheckReport">
+            <End Role="RepCheckReport" EntitySet="RepCheckReport" />
+            <End Role="MissingFile" EntitySet="MissingFile" />
+          </AssociationSet>
+          <AssociationSet Name="FK_OrphanedFile_RepCheckReport" Association="Self.FK_OrphanedFile_RepCheckReport">
+            <End Role="RepCheckReport" EntitySet="RepCheckReport" />
+            <End Role="OrphanedFile" EntitySet="OrphanedFile" />
+          </AssociationSet>
+        </EntityContainer>
+      </Schema></edmx:StorageModels>
+    <!-- CSDL content -->
+    <edmx:ConceptualModels>
+      <Schema Namespace="RepCheck" Alias="Self" annotation:UseStrongSpatialTypes="false" xmlns:annotation="http://schemas.microsoft.com/ado/2009/02/edm/annotation" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm">
+        <EntityContainer Name="ReportEntities" annotation:LazyLoadingEnabled="true">
+          <EntitySet Name="MissingFiles" EntityType="RepCheck.MissingFile" />
+          <EntitySet Name="OrphanedFiles" EntityType="RepCheck.OrphanedFile" />
+          <EntitySet Name="RepCheckReports" EntityType="RepCheck.RepCheckReport" />
+          <AssociationSet Name="FK_MissingFile_RepCheckReport" Association="RepCheck.FK_MissingFile_RepCheckReport">
+            <End Role="RepCheckReport" EntitySet="RepCheckReports" />
+            <End Role="MissingFile" EntitySet="MissingFiles" />
+          </AssociationSet>
+          <AssociationSet Name="FK_OrphanedFile_RepCheckReport" Association="RepCheck.FK_OrphanedFile_RepCheckReport">
+            <End Role="RepCheckReport" EntitySet="RepCheckReports" />
+            <End Role="OrphanedFile" EntitySet="OrphanedFiles" />
+          </AssociationSet>
+        </EntityContainer>
+        <EntityType Name="MissingFile">
+          <Key>
+            <PropertyRef Name="MissingFileID" />
+          </Key>
+          <Property Name="MissingFileID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="ReportID" Type="Int32" Nullable="false" />
+          <Property Name="ObjectID" Type="String" Nullable="false" MaxLength="50" FixedLength="false" Unicode="false" />
+          <NavigationProperty Name="RepCheckReport" Relationship="RepCheck.FK_MissingFile_RepCheckReport" FromRole="MissingFile" ToRole="RepCheckReport" />
+        </EntityType>
+        <EntityType Name="OrphanedFile">
+          <Key>
+            <PropertyRef Name="OrphanedFileID" />
+          </Key>
+          <Property Name="OrphanedFileID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="ReportID" Type="Int32" Nullable="false" />
+          <Property Name="Path" Type="String" Nullable="false" MaxLength="500" FixedLength="false" Unicode="false" />
+          <Property Name="CreationTime" Type="DateTime" Nullable="false" Precision="3" />
+          <NavigationProperty Name="RepCheckReport" Relationship="RepCheck.FK_OrphanedFile_RepCheckReport" FromRole="OrphanedFile" ToRole="RepCheckReport" />
+        </EntityType>
+        <EntityType Name="RepCheckReport">
+          <Key>
+            <PropertyRef Name="ReportID" />
+          </Key>
+          <Property Name="ReportID" Type="Int32" Nullable="false" annotation:StoreGeneratedPattern="Identity" />
+          <Property Name="ReportDate" Type="DateTime" Nullable="false" Precision="3" />
+          <Property Name="ObjectStoreName" Type="String" Nullable="false" MaxLength="50" FixedLength="false" Unicode="false" />
+          <Property Name="DBTime" Type="Decimal" Nullable="false" Precision="10" Scale="3" />
+          <Property Name="FSTime" Type="Decimal" Nullable="false" Precision="10" Scale="3" />
+          <Property Name="ProcessTime" Type="Decimal" Nullable="false" Precision="10" Scale="3" />
+          <NavigationProperty Name="MissingFiles" Relationship="RepCheck.FK_MissingFile_RepCheckReport" FromRole="RepCheckReport" ToRole="MissingFile" />
+          <NavigationProperty Name="OrphanedFiles" Relationship="RepCheck.FK_OrphanedFile_RepCheckReport" FromRole="RepCheckReport" ToRole="OrphanedFile" />
+        </EntityType>
+        <Association Name="FK_MissingFile_RepCheckReport">
+          <End Type="RepCheck.RepCheckReport" Role="RepCheckReport" Multiplicity="1" />
+          <End Type="RepCheck.MissingFile" Role="MissingFile" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="RepCheckReport">
+              <PropertyRef Name="ReportID" />
+            </Principal>
+            <Dependent Role="MissingFile">
+              <PropertyRef Name="ReportID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+        <Association Name="FK_OrphanedFile_RepCheckReport">
+          <End Type="RepCheck.RepCheckReport" Role="RepCheckReport" Multiplicity="1" />
+          <End Type="RepCheck.OrphanedFile" Role="OrphanedFile" Multiplicity="*" />
+          <ReferentialConstraint>
+            <Principal Role="RepCheckReport">
+              <PropertyRef Name="ReportID" />
+            </Principal>
+            <Dependent Role="OrphanedFile">
+              <PropertyRef Name="ReportID" />
+            </Dependent>
+          </ReferentialConstraint>
+        </Association>
+      </Schema>
+    </edmx:ConceptualModels>
+    <!-- C-S mapping content -->
+    <edmx:Mappings>
+      <Mapping Space="C-S" xmlns="http://schemas.microsoft.com/ado/2009/11/mapping/cs">
+        <EntityContainerMapping StorageEntityContainer="RepCheckStoreContainer" CdmEntityContainer="ReportEntities">
+          <EntitySetMapping Name="MissingFiles">
+            <EntityTypeMapping TypeName="RepCheck.MissingFile">
+              <MappingFragment StoreEntitySet="MissingFile">
+                <ScalarProperty Name="ObjectID" ColumnName="ObjectID" />
+                <ScalarProperty Name="ReportID" ColumnName="ReportID" />
+                <ScalarProperty Name="MissingFileID" ColumnName="MissingFileID" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="OrphanedFiles">
+            <EntityTypeMapping TypeName="RepCheck.OrphanedFile">
+              <MappingFragment StoreEntitySet="OrphanedFile">
+                <ScalarProperty Name="CreationTime" ColumnName="CreationTime" />
+                <ScalarProperty Name="Path" ColumnName="Path" />
+                <ScalarProperty Name="ReportID" ColumnName="ReportID" />
+                <ScalarProperty Name="OrphanedFileID" ColumnName="OrphanedFileID" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+          <EntitySetMapping Name="RepCheckReports">
+            <EntityTypeMapping TypeName="RepCheck.RepCheckReport">
+              <MappingFragment StoreEntitySet="RepCheckReport">
+                <ScalarProperty Name="ProcessTime" ColumnName="ProcessTime" />
+                <ScalarProperty Name="FSTime" ColumnName="FSTime" />
+                <ScalarProperty Name="DBTime" ColumnName="DBTime" />
+                <ScalarProperty Name="ObjectStoreName" ColumnName="ObjectStoreName" />
+                <ScalarProperty Name="ReportDate" ColumnName="ReportDate" />
+                <ScalarProperty Name="ReportID" ColumnName="ReportID" />
+              </MappingFragment>
+            </EntityTypeMapping>
+          </EntitySetMapping>
+        </EntityContainerMapping>
+      </Mapping>
+    </edmx:Mappings>
+  </edmx:Runtime>
+  <!-- EF Designer content (DO NOT EDIT MANUALLY BELOW HERE) -->
+  <Designer xmlns="http://schemas.microsoft.com/ado/2009/11/edmx">
+    <Connection>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="MetadataArtifactProcessing" Value="EmbedInOutputAssembly" />
+      </DesignerInfoPropertySet>
+    </Connection>
+    <Options>
+      <DesignerInfoPropertySet>
+        <DesignerProperty Name="ValidateOnBuild" Value="true" />
+        <DesignerProperty Name="EnablePluralization" Value="true" />
+        <DesignerProperty Name="IncludeForeignKeysInModel" Value="true" />
+        <DesignerProperty Name="UseLegacyProvider" Value="false" />
+        <DesignerProperty Name="CodeGenerationStrategy" Value="None" />
+      </DesignerInfoPropertySet>
+    </Options>
+    <!-- Diagram content (shape and connector positions) -->
+    <Diagrams></Diagrams>
+  </Designer>
+</edmx:Edmx>
