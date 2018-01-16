@@ -14,8 +14,6 @@ Module Main
     Dim FilesNotInDB As List(Of Guid) = Nothing
     Dim DBRecsNotInFS As List(Of Guid) = Nothing
 
-    Dim MaxThreads As Integer = 0
-
     Dim SharedExitCode As ExitCode = ExitCode.SUCCESS
 
     Private Log As ILog = LogManager.GetLogger("WCFRestAppender")
@@ -23,56 +21,26 @@ Module Main
     Function Main() As Integer
         Dim args() As String = System.Environment.GetCommandLineArgs()
 
-        Dim DatabaseServer As String = String.Empty
-        Dim ObjectStoreDatabaseName As String = String.Empty
-        Dim ReportDatabaseName As String = String.Empty
-        Dim ObjectStoreName As String = String.Empty
-        Dim FileStoreName As String = String.Empty
-        Dim AutoUpload As Boolean
-        Dim ComparePrevious As Boolean = True
-
         Try
-            For Each arg As String In args
-                Select Case arg
-                    Case "/os"
-                        ObjectStoreName = args(Array.IndexOf(args, arg) + 1)
-                    Case "/fs"
-                        FileStoreName = args(Array.IndexOf(args, arg) + 1)
-                    Case "/ddb"
-                        ObjectStoreDatabaseName = args(Array.IndexOf(args, arg) + 1)
-                    Case "/rdb"
-                        ReportDatabaseName = args(Array.IndexOf(args, arg) + 1)
-                    Case "/s"
-                        DatabaseServer = args(Array.IndexOf(args, arg) + 1)
-                    Case "/y"
-                        AutoUpload = True
-                    Case "/t"
-                        MaxThreads = CInt(args(Array.IndexOf(args, arg) + 1))
-                    Case "/?"
-                        Console.WriteLine("Purpose: find missing and orphaned document files in a FileNet system.")
-                        Console.WriteLine("")
-                        Console.WriteLine("Usage:")
-                        Console.WriteLine("RepCheck.exe /s dbserver\instance /os objectstore [/fs filestore] /ddb docDB /rdb reportDB [/t maxthreads] [/y]")
-                        Console.WriteLine("")
-                        Console.WriteLine("/fs is an optional parameter for object stores with more than one file store.")
-                        Console.WriteLine("/t is an optional parameter for specifying a max thread count. MaxThreads setting in the config file will be used if this switch is not specified.")
-                        Console.WriteLine("/y Indicates to automatically upload report information to server (for unattended operation).")
-                        Return ExitCode.SUCCESS
-                End Select
-            Next
-
-            'Check arguments
-            If (String.IsNullOrWhiteSpace(ObjectStoreName) OrElse String.IsNullOrWhiteSpace(ObjectStoreDatabaseName) OrElse
-                String.IsNullOrWhiteSpace(DatabaseServer) OrElse String.IsNullOrWhiteSpace(ReportDatabaseName)) Then
-                Throw New ArgumentException("Invalid argument.")
+            Dim Options As Options = GetOptions(args)
+            'print help if /? is passed
+            If (Options.Help) Then
+                Console.WriteLine("Purpose: find missing and orphaned document files in a FileNet system.")
+                Console.WriteLine("")
+                Console.WriteLine("Usage:")
+                Console.WriteLine("RepCheck.exe /s dbserver\instance /os objectstore [/fs filestore] /ddb docDB /rdb reportDB [/t maxthreads] [/y]")
+                Console.WriteLine("")
+                Console.WriteLine("/fs is an optional parameter for object stores with more than one file store.")
+                Console.WriteLine("/t is an optional parameter for specifying a max thread count. MaxThreads setting in the config file will be used if this switch is not specified.")
+                Console.WriteLine("/y Indicates to automatically upload report information to server (for unattended operation).")
+                Return ExitCode.SUCCESS
             End If
-
             'This allows for tuning. Without this we could technically fire off more threads than storage can handle.
-            If (MaxThreads = 0) Then
+            If (Options.MaxThreads = 0) Then
                 MaxThreads = ConfigurationManager.AppSettings("MaxThreads")
             End If
 
-            Dim FileStores As List(Of FileStoreInfo) = GetFileStoreInfos(DatabaseServer, ObjectStoreDatabaseName)
+            Dim FileStores As List(Of FileStoreInfo) = GetFileStoreInfos(Options.DatabaseServer, Options.ObjectStoreDatabaseName)
 
             'Filter on file store name if supplied.
             If (Not String.IsNullOrWhiteSpace(FileStoreName)) Then
@@ -131,6 +99,37 @@ Module Main
 
         Console.WriteLine("Finished.")
         Return SharedExitCode
+    End Function
+
+    Private Function GetOptions(args As String()) As Options
+        Dim ret As Options = New Options()
+
+        For Each arg As String In args
+            Select Case arg
+                Case "/os"
+                    ret.ObjectStoreName = args(Array.IndexOf(args, arg) + 1)
+                Case "/fs"
+                    ret.FileStoreName = args(Array.IndexOf(args, arg) + 1)
+                Case "/ddb"
+                    ret.ObjectStoreDatabaseName = args(Array.IndexOf(args, arg) + 1)
+                Case "/rdb"
+                    ret.ReportDatabaseName = args(Array.IndexOf(args, arg) + 1)
+                Case "/s"
+                    ret.DatabaseServer = args(Array.IndexOf(args, arg) + 1)
+                Case "/y"
+                    ret.AutoUpload = True
+                Case "/t"
+                    ret.MaxThreads = CInt(args(Array.IndexOf(args, arg) + 1))
+                Case "/?"
+                    ret.Help = True
+            End Select
+        Next
+
+        'Check arguments
+        If (String.IsNullOrWhiteSpace(ObjectStoreName) OrElse String.IsNullOrWhiteSpace(ObjectStoreDatabaseName) OrElse
+                String.IsNullOrWhiteSpace(DatabaseServer) OrElse String.IsNullOrWhiteSpace(ReportDatabaseName)) Then
+            Throw New ArgumentException("Invalid argument.")
+        End If
     End Function
 
     Private Function RunReport(ObjectStoreName As String, ObjectStoreDatabaseName As String, ReportDatabaseName As String,
