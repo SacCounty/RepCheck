@@ -29,6 +29,7 @@ Module Main
         Dim ObjectStoreName As String = String.Empty
         Dim FileStoreName As String = String.Empty
         Dim AutoUpload As Boolean
+        Dim ComparePrevious As Boolean = True
 
         Try
             For Each arg As String In args
@@ -82,14 +83,44 @@ Module Main
             End If
 
             For Each fs As FileStoreInfo In FileStores
-                RunReport(ObjectStoreName, ObjectStoreDatabaseName, ReportDatabaseName, DatabaseServer, fs.FileStoreName, fs.FileStoreId, fs.FileStoreLocation, AutoUpload)
+                Dim NewReport As RepCheckReport = RunReport(ObjectStoreName, ObjectStoreDatabaseName, ReportDatabaseName, DatabaseServer, fs.FileStoreName, fs.FileStoreId, fs.FileStoreLocation)
+
+                If (Not AutoUpload) Then
+                    Console.WriteLine("Upload report data to server? (Y|N)")
+                    If (Console.ReadLine().ToUpper() = "Y") Then
+                        AutoUpload = True
+                    End If
+                End If
+
+                If (AutoUpload) Then
+                    Log.Debug("Uploading report data.")
+                    Try
+                        Dim entities As ReportEntities = New ReportEntities("metadata=res://*/ReportModel.csdl|res://*/ReportModel.ssdl|res://*/ReportModel.msl;provider=System.Data.SqlClient;provider connection string=""data source=" &
+                                                                    DatabaseServer & ";initial catalog=" & ReportDatabaseName & ";integrated security=True;MultipleActiveResultSets=True;App=EntityFramework""")
+                        entities.RepCheckReports.Add(NewReport)
+                        entities.SaveChanges()
+
+                        If (ComparePrevious) Then
+                            Dim PrevReport As RepCheckReport = entities.RepCheckReports.Where(
+                                Function(r) r.ObjectStoreName = ObjectStoreName And "" = FileStoreName And r.ReportID <> NewReport.ReportID).OrderByDescending(
+                                Function(r) r.ReportDate).FirstOrDefault()
+                            If (PrevReport IsNot Nothing) Then
+                                Dim NewOrphans As List(Of OrphanedFile) = NewReport.OrphanedFiles.Except(PrevReport.OrphanedFiles, New OrphanComparer(Of OrphanedFile))
+                            Else
+                                Log.Info("No previous report for this object store and file store.")
+                            End If
+                        End If
+                    Catch ex As Exception
+                        Log.Error("Error adding report data. ", ex)
+                        SharedExitCode = ExitCode.ERROR_DATABASE_FAILURE
+                        Throw
+                    End Try
+                End If
             Next
         Catch aex As ArgumentException
-            Console.WriteLine(aex.Message)
             Log.Error(aex)
             Return ExitCode.ERROR_BAD_ARGUMENTS
         Catch ex As Exception
-            Console.WriteLine(ex.Message)
             Log.Error(ex)
             If SharedExitCode = ExitCode.SUCCESS Then
                 'Exception was thrown outside of try blocks. Return generic error.
@@ -102,11 +133,10 @@ Module Main
         Return SharedExitCode
     End Function
 
-    Private Sub RunReport(ObjectStoreName As String, ObjectStoreDatabaseName As String, ReportDatabaseName As String,
-                          DatabaseServer As String, FileStoreName As String, FileStoreId As String, FileStoreLocation As String, AutoUpload As Boolean)
+    Private Function RunReport(ObjectStoreName As String, ObjectStoreDatabaseName As String, ReportDatabaseName As String,
+                          DatabaseServer As String, FileStoreName As String, FileStoreId As String, FileStoreLocation As String) As RepCheckReport
 
         Log.Info("Running RepCheck report for Object Store: " & ObjectStoreName & " with File Store: " & FileStoreName)
-        Console.WriteLine("Running RepCheck report for Object Store: " & ObjectStoreName & " with File Store: " & FileStoreName)
 
         'This is to reset in the event of multiple file stores.
         FileStoreObjDict = New ConcurrentDictionary(Of Guid, String)
@@ -137,7 +167,6 @@ Module Main
                                                 End If
                                                 Dim ending As DateTime = DateTime.Now
                                                 fsdur = ((ending.Ticks - start.Ticks) / 10000000)
-                                                Console.WriteLine("File acquisition took " & fsdur & " seconds.")
                                                 Log.Debug("File acquisition took " & fsdur & " seconds.")
                                             End Sub)
         MyTasks(0) = GetFilesTask
@@ -155,7 +184,6 @@ Module Main
                                                           DBObjs.Add(dataReader.GetGuid(0))
                                                       Loop
                                                   Catch ex As Exception
-                                                      Console.WriteLine(ex.Message)
                                                       Log.Error(ex)
                                                       SharedExitCode = ExitCode.ERROR_DATABASE_FAILURE
                                                       Throw
@@ -163,7 +191,6 @@ Module Main
 
                                                   Dim ending As DateTime = DateTime.Now
                                                   dbdur = ((ending.Ticks - start.Ticks) / 10000000)
-                                                  Console.WriteLine("DB acquisition took " & dbdur & " seconds.")
                                                   Log.Debug("DB acquisition took " & dbdur & " seconds.")
                                               End Using
                                           End Sub)
@@ -180,14 +207,12 @@ Module Main
             'An exception was generated in at least one of the tasks. No need to run through all of them.
             'Just report the last one and let the admin work it out from there.
             Log.Error("Error aquiring data to generate report.", ex)
-            Console.WriteLine("Error aquiring data to generate report.")
             If SharedExitCode = ExitCode.SUCCESS Then
                 SharedExitCode = ExitCode.ERROR_PROCESS_ABORTED
             End If
             Throw
         End Try
 
-        Console.WriteLine("Retrieved " & FileStoreObjs.Count & " files and " & DBObjs.Count & " DB records.")
         Log.Debug("Retrieved " & FileStoreObjs.Count & " files and " & DBObjs.Count & " DB records.")
 
         Dim startproc As DateTime = Now
@@ -198,31 +223,14 @@ Module Main
         DBRecsNotInFS.AddRange(DBObjs.AsParallel().Except(FileStoreObjs.AsParallel()))
 
         'Write out and log results
-        Console.WriteLine("FileStore: " & FileStoreName & " has " & FilesNotInDB.Count & " orphans.")
         Log.Info("FileStore: " & FileStoreName & " has " & FilesNotInDB.Count & " orphans.")
-        Console.WriteLine("ObjectStore: " & ObjectStoreName & "  has " & DBRecsNotInFS.Count & " missing files.")
         Log.Info("ObjectStore: " & ObjectStoreName & "  has " & DBRecsNotInFS.Count & " missing files.")
 
         Dim procending As DateTime = DateTime.Now
         procdur = ((procending.Ticks - startproc.Ticks) / 10000000)
-        Console.WriteLine("Processing time was " & procdur & " seconds.")
         Log.Debug("Processing time was " & procdur & " seconds.")
-
-        If (Not AutoUpload) Then
-            Console.WriteLine("Upload report data to server? (Y|N)")
-            If (Console.ReadLine().ToUpper() = "Y") Then
-                AutoUpload = True
-            End If
-        End If
-
-        If (AutoUpload) Then
-
-            Console.WriteLine("Uploading report data.")
-            Log.Debug("Uploading report data.")
-            Try
-                Dim entities As ReportEntities = New ReportEntities("metadata=res://*/ReportModel.csdl|res://*/ReportModel.ssdl|res://*/ReportModel.msl;provider=System.Data.SqlClient;provider connection string=""data source=" &
-                                                                    DatabaseServer & ";initial catalog=" & ReportDatabaseName & ";integrated security=True;MultipleActiveResultSets=True;App=EntityFramework""")
-                Dim newReport As RepCheckReport = New RepCheckReport() With {
+        Try
+            Dim NewReport As RepCheckReport = New RepCheckReport() With {
                     .ReportDate = Now,
                     .ObjectStoreName = ObjectStoreName,
                     .DBTime = dbdur,
@@ -230,33 +238,23 @@ Module Main
                     .ProcessTime = procdur
                 }
 
-                entities.RepCheckReports.Add(newReport)
+            For Each orphan In FilesNotInDB
+                Dim path As String = FileStoreObjDict(orphan)
+                Dim CreateDate As DateTime = New FileInfo(path).CreationTime
+                NewReport.OrphanedFiles.Add(New OrphanedFile() With {.RepCheckReport = NewReport, .Path = path, .CreationTime = CreateDate})
+            Next
 
-                For Each orphan In FilesNotInDB
-                    Dim path As String = FileStoreObjDict(orphan)
-                    Dim CreateDate As DateTime = New FileInfo(path).CreationTime
-                    newReport.OrphanedFiles.Add(New OrphanedFile() With {.RepCheckReport = newReport, .Path = path, .CreationTime = CreateDate})
-                Next
+            For Each missing In DBRecsNotInFS
+                NewReport.MissingFiles.Add(New MissingFile() With {.RepCheckReport = NewReport, .ObjectID = missing.ToString("D")})
+            Next
 
-                For Each missing In DBRecsNotInFS
-                    newReport.MissingFiles.Add(New MissingFile() With {.RepCheckReport = newReport, .ObjectID = missing.ToString("D")})
-                Next
-
-                entities.SaveChanges()
-
-            Catch ex As Exception
-                Log.Error(ex)
-                Console.WriteLine("Error adding report data. " & ex.Message)
-                SharedExitCode = ExitCode.ERROR_DATABASE_FAILURE
-                Throw
-            End Try
-        End If
-
-        Dim totending As DateTime = DateTime.Now
-        totduration = ((totending.Ticks - start.Ticks) / 10000000)
-        Console.WriteLine("Total time was " & totduration & " seconds.")
-        Log.Debug("Total time was " & totduration & " seconds.")
-    End Sub
+            Return NewReport
+        Catch ex As Exception
+            Log.Error(ex)
+            SharedExitCode = ExitCode.ERROR_DATABASE_FAILURE
+            Throw
+        End Try
+    End Function
 
     Private Sub GetFiles(folder As DirectoryInfo, options As ParallelOptions, exceptions As ConcurrentBag(Of Exception))
         Try
@@ -281,7 +279,6 @@ Module Main
                 Else
                     'Not due to latency. Fail whole job
                     Dim message As String = "Error accessing contents of path: " & folder.FullName
-                    Console.WriteLine(message)
                     Log.Error(message)
                     SharedExitCode = ExitCode.ERROR_ACCESS_DENIED
                     exceptions.Add(fex)
@@ -320,9 +317,7 @@ Module Main
                                                                                              End Function)
                                          End If
                                      Catch ex As Exception
-                                         Dim message As String = "Error accessing file in folder: " & folder.FullName
-                                         Console.WriteLine(message)
-                                         Log.Error(message)
+                                         Log.Error("Error accessing file in folder: " & folder.FullName)
                                          SharedExitCode = ExitCode.ERROR_ACCESS_DENIED
                                          exceptions.Add(ex)
                                      End Try
@@ -330,7 +325,6 @@ Module Main
                 End If
             End If
         Catch ex As Exception
-            Console.WriteLine(ex.Message)
             Log.Error(ex)
             SharedExitCode = ExitCode.ERROR_ACCESS_DENIED
             exceptions.Add(ex)
@@ -363,7 +357,6 @@ Module Main
                             .FileStoreLocation = fileStoreLocation})
                 Loop
             Catch ex As Exception
-                Console.WriteLine(ex.Message)
                 Log.Error(ex)
                 SharedExitCode = ExitCode.ERROR_DATABASE_FAILURE
                 Throw
