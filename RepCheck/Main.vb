@@ -5,6 +5,8 @@ Imports System.Data.SqlClient
 Imports System.Configuration
 Imports log4net
 
+' TODO: add FileStoreName to DB
+' TODO: Verify adding relatioship objects after the fact still works with EF6
 
 Module Main
     Dim FileStoreObjDict As ConcurrentDictionary(Of Guid, String) = Nothing
@@ -35,45 +37,46 @@ Module Main
                 Console.WriteLine("/y Indicates to automatically upload report information to server (for unattended operation).")
                 Return ExitCode.SUCCESS
             End If
-            'This allows for tuning. Without this we could technically fire off more threads than storage can handle.
-            If (Options.MaxThreads = 0) Then
-                MaxThreads = ConfigurationManager.AppSettings("MaxThreads")
-            End If
 
             Dim FileStores As List(Of FileStoreInfo) = GetFileStoreInfos(Options.DatabaseServer, Options.ObjectStoreDatabaseName)
 
             'Filter on file store name if supplied.
-            If (Not String.IsNullOrWhiteSpace(FileStoreName)) Then
-                FileStores = FileStores.Where(Function(fs) fs.FileStoreName = FileStoreName).ToList()
+            If (Not String.IsNullOrWhiteSpace(Options.FileStoreName)) Then
+                FileStores = FileStores.Where(Function(fs) fs.FileStoreName = Options.FileStoreName).ToList()
                 If (FileStores.Count <> 1) Then
                     Throw New ArgumentException("Invalid file store name.")
                 End If
             End If
 
             For Each fs As FileStoreInfo In FileStores
-                Dim NewReport As RepCheckReport = RunReport(ObjectStoreName, ObjectStoreDatabaseName, ReportDatabaseName, DatabaseServer, fs.FileStoreName, fs.FileStoreId, fs.FileStoreLocation)
+                Dim NewReport As RepCheckReport = RunReport(Options, fs)
 
-                If (Not AutoUpload) Then
+                If (Not Options.AutoUpload) Then
                     Console.WriteLine("Upload report data to server? (Y|N)")
                     If (Console.ReadLine().ToUpper() = "Y") Then
-                        AutoUpload = True
+                        Options.AutoUpload = True
                     End If
                 End If
 
-                If (AutoUpload) Then
+                If (Options.AutoUpload) Then
                     Log.Debug("Uploading report data.")
                     Try
                         Dim entities As ReportEntities = New ReportEntities("metadata=res://*/ReportModel.csdl|res://*/ReportModel.ssdl|res://*/ReportModel.msl;provider=System.Data.SqlClient;provider connection string=""data source=" &
-                                                                    DatabaseServer & ";initial catalog=" & ReportDatabaseName & ";integrated security=True;MultipleActiveResultSets=True;App=EntityFramework""")
+                                                                    Options.DatabaseServer & ";initial catalog=" & Options.ReportDatabaseName & ";integrated security=True;MultipleActiveResultSets=True;App=EntityFramework""")
                         entities.RepCheckReports.Add(NewReport)
                         entities.SaveChanges()
 
-                        If (ComparePrevious) Then
+                        If (Options.ComparePrevious) Then
                             Dim PrevReport As RepCheckReport = entities.RepCheckReports.Where(
-                                Function(r) r.ObjectStoreName = ObjectStoreName And "" = FileStoreName And r.ReportID <> NewReport.ReportID).OrderByDescending(
+                                Function(r) r.ObjectStoreName = Options.ObjectStoreName And "" = fs.FileStoreName And r.ReportID <> NewReport.ReportID).OrderByDescending(
                                 Function(r) r.ReportDate).FirstOrDefault()
                             If (PrevReport IsNot Nothing) Then
-                                Dim NewOrphans As List(Of OrphanedFile) = NewReport.OrphanedFiles.Except(PrevReport.OrphanedFiles, New OrphanComparer(Of OrphanedFile))
+                                Dim NewOrphans As List(Of OrphanedFile) = NewReport.OrphanedFiles.Except(PrevReport.OrphanedFiles, New OrphanComparer()).ToList()
+                                Dim NewMissing As List(Of MissingFile) = NewReport.MissingFiles.Except(PrevReport.MissingFiles, New MissingComparer()).ToList()
+                                If (NewOrphans.Count > 0 Or NewMissing.Count > 0) Then
+                                    Log.Info("RepCheck found " & NewOrphans.Count & " new orphans and " & NewMissing.Count & " new missing files in " & Options.ObjectStoreName & " - " & fs.FileStoreName)
+                                    SendReport(NewOrphans, NewMissing)
+                                End If
                             Else
                                 Log.Info("No previous report for this object store and file store.")
                             End If
@@ -125,17 +128,56 @@ Module Main
             End Select
         Next
 
+        'This allows for tuning. Without this we could technically fire off more threads than storage can handle.
+        If (ret.MaxThreads = 0) Then
+            ret.MaxThreads = Convert.ToInt16(ConfigurationManager.AppSettings("MaxThreads"))
+        End If
+
         'Check arguments
-        If (String.IsNullOrWhiteSpace(ObjectStoreName) OrElse String.IsNullOrWhiteSpace(ObjectStoreDatabaseName) OrElse
-                String.IsNullOrWhiteSpace(DatabaseServer) OrElse String.IsNullOrWhiteSpace(ReportDatabaseName)) Then
+        If (String.IsNullOrWhiteSpace(ret.ObjectStoreName) OrElse String.IsNullOrWhiteSpace(ret.ObjectStoreDatabaseName) OrElse
+                String.IsNullOrWhiteSpace(ret.DatabaseServer) OrElse String.IsNullOrWhiteSpace(ret.ReportDatabaseName)) Then
             Throw New ArgumentException("Invalid argument.")
         End If
+        Return ret
     End Function
 
-    Private Function RunReport(ObjectStoreName As String, ObjectStoreDatabaseName As String, ReportDatabaseName As String,
-                          DatabaseServer As String, FileStoreName As String, FileStoreId As String, FileStoreLocation As String) As RepCheckReport
+    Private Function GetFileStoreInfos(DatabaseServer As String, ObjectStoreDatabaseName As String) As List(Of FileStoreInfo)
+        Dim connectionString As String = "Server=" & DatabaseServer & ";Database=" & ObjectStoreDatabaseName & ";Integrated Security=true"
+        Dim ret As List(Of FileStoreInfo) = New List(Of FileStoreInfo)()
 
-        Log.Info("Running RepCheck report for Object Store: " & ObjectStoreName & " with File Store: " & FileStoreName)
+        Using connection As New SqlConnection(connectionString)
+            Dim command As New SqlCommand("SELECT s.display_name, s.object_id, s.fs_ads_path, c.symbolic_name FROM storageclass s " &
+                                          "INNER JOIN classdefinition c on s.object_class_id = c.object_id " &
+                                          "WHERE (c.symbolic_name = 'FileStorageArea' OR c.symbolic_name = 'FixedStorageArea')", connection)
+            Try
+                connection.Open()
+                Dim dataReader As SqlDataReader = command.ExecuteReader()
+                Do While dataReader.Read()
+                    'The following section is equired until access to GCD can be done to determine fixed content device path.
+                    Dim fileStoreLocation As String
+                    If (dataReader.GetString(3) = "FixedStorageArea") Then
+                        fileStoreLocation = ConfigurationManager.AppSettings(dataReader.GetGuid(1).ToString().ToUpper())
+                    Else
+                        fileStoreLocation = dataReader.GetString(2) & "\content"
+                    End If
+                    'end of section
+                    ret.Add(New FileStoreInfo() With {
+                            .FileStoreName = dataReader(0).ToString(),
+                            .FileStoreId = dataReader(1).ToString().ToUpper(),
+                            .FileStoreLocation = fileStoreLocation})
+                Loop
+            Catch ex As Exception
+                Log.Error(ex)
+                SharedExitCode = ExitCode.ERROR_DATABASE_FAILURE
+                Throw
+            End Try
+        End Using
+
+        Return ret
+    End Function
+
+    Private Function RunReport(Options As Options, fs As FileStoreInfo) As RepCheckReport
+        Log.Info("Running RepCheck report for Object Store: " & Options.ObjectStoreName & " with File Store: " & fs.FileStoreName)
 
         'This is to reset in the event of multiple file stores.
         FileStoreObjDict = New ConcurrentDictionary(Of Guid, String)
@@ -152,30 +194,29 @@ Module Main
         Dim dbdur As Decimal
         Dim fsdur As Decimal
         Dim procdur As Decimal
-        Dim totduration As Decimal
 
         Dim MyTasks(1) As Task
 
         Dim GetFilesTask As Task = New Task(Sub()
                                                 Dim exceptions As ConcurrentBag(Of Exception) = New ConcurrentBag(Of Exception)
-                                                Dim root As DirectoryInfo = New DirectoryInfo(FileStoreLocation)
-                                                GetFiles(root, New ParallelOptions() With {.MaxDegreeOfParallelism = MaxThreads}, exceptions)
+                                                Dim root As DirectoryInfo = New DirectoryInfo(fs.FileStoreLocation)
+                                                GetFiles(root, New ParallelOptions() With {.MaxDegreeOfParallelism = Options.MaxThreads}, exceptions)
                                                 'Check if exceptions was thrown while getting files.
                                                 If (exceptions.Count > 0) Then
                                                     Throw New AggregateException("Exception during file acquisition. Aborting.", exceptions)
                                                 End If
                                                 Dim ending As DateTime = DateTime.Now
-                                                fsdur = ((ending.Ticks - start.Ticks) / 10000000)
+                                                fsdur = Convert.ToDecimal((ending.Ticks - start.Ticks) / 10000000)
                                                 Log.Debug("File acquisition took " & fsdur & " seconds.")
                                             End Sub)
         MyTasks(0) = GetFilesTask
 
         Dim GetIDsTask As Task = New Task(Sub()
-                                              Dim connectionString As String = "Server=" & DatabaseServer & ";Database=" & ObjectStoreDatabaseName & ";Integrated Security=true"
+                                              Dim connectionString As String = "Server=" & Options.DatabaseServer & ";Database=" & Options.ObjectStoreDatabaseName & ";Integrated Security=true"
 
                                               'Get all relevant doc GUIDs as fast as possible
                                               Using connection As New SqlConnection(connectionString)
-                                                  Dim command As New SqlCommand("select dv.object_id from docversion dv where dv.version_status <> 3 and (dv.storage_area_id = '" & FileStoreId & "' or dv.storage_location = 'FNFS:/{" & FileStoreId & "}')", connection)
+                                                  Dim command As New SqlCommand("select dv.object_id from docversion dv where dv.version_status <> 3 and (dv.storage_area_id = '" & fs.FileStoreId & "' or dv.storage_location = 'FNFS:/{" & fs.FileStoreId & "}')", connection)
                                                   Try
                                                       connection.Open()
                                                       Dim dataReader As SqlDataReader = command.ExecuteReader()
@@ -189,7 +230,7 @@ Module Main
                                                   End Try
 
                                                   Dim ending As DateTime = DateTime.Now
-                                                  dbdur = ((ending.Ticks - start.Ticks) / 10000000)
+                                                  dbdur = Convert.ToDecimal((ending.Ticks - start.Ticks) / 10000000)
                                                   Log.Debug("DB acquisition took " & dbdur & " seconds.")
                                               End Using
                                           End Sub)
@@ -222,16 +263,16 @@ Module Main
         DBRecsNotInFS.AddRange(DBObjs.AsParallel().Except(FileStoreObjs.AsParallel()))
 
         'Write out and log results
-        Log.Info("FileStore: " & FileStoreName & " has " & FilesNotInDB.Count & " orphans.")
-        Log.Info("ObjectStore: " & ObjectStoreName & "  has " & DBRecsNotInFS.Count & " missing files.")
+        Log.Info("FileStore: " & fs.FileStoreName & " has " & FilesNotInDB.Count & " orphans.")
+        Log.Info("ObjectStore: " & Options.ObjectStoreName & "  has " & DBRecsNotInFS.Count & " missing files.")
 
         Dim procending As DateTime = DateTime.Now
-        procdur = ((procending.Ticks - startproc.Ticks) / 10000000)
+        procdur = Convert.ToDecimal((procending.Ticks - startproc.Ticks) / 10000000)
         Log.Debug("Processing time was " & procdur & " seconds.")
         Try
             Dim NewReport As RepCheckReport = New RepCheckReport() With {
                     .ReportDate = Now,
-                    .ObjectStoreName = ObjectStoreName,
+                    .ObjectStoreName = Options.ObjectStoreName,
                     .DBTime = dbdur,
                     .FSTime = fsdur,
                     .ProcessTime = procdur
@@ -303,8 +344,8 @@ Module Main
                                  Sub(fil)
                                      Try
                                          Dim name As String = fil.Name
-                                         Dim start As Int16 = name.IndexOf("{")
-                                         Dim ending As Int16 = name.IndexOf("}")
+                                         Dim start As Integer = name.IndexOf("{")
+                                         Dim ending As Integer = name.IndexOf("}")
                                          If (start < 0 OrElse ending < 0) Then
                                              Console.WriteLine(name & " invalid file name.")
                                          Else
@@ -330,38 +371,11 @@ Module Main
         End Try
     End Sub
 
-    Private Function GetFileStoreInfos(DatabaseServer As String, ObjectStoreDatabaseName As String) As List(Of FileStoreInfo)
-        Dim connectionString As String = "Server=" & DatabaseServer & ";Database=" & ObjectStoreDatabaseName & ";Integrated Security=true"
-        Dim ret As List(Of FileStoreInfo) = New List(Of FileStoreInfo)()
-
-        Using connection As New SqlConnection(connectionString)
-            Dim command As New SqlCommand("SELECT s.display_name, s.object_id, s.fs_ads_path, c.symbolic_name FROM storageclass s " &
-                                          "INNER JOIN classdefinition c on s.object_class_id = c.object_id " &
-                                          "WHERE (c.symbolic_name = 'FileStorageArea' OR c.symbolic_name = 'FixedStorageArea')", connection)
-            Try
-                connection.Open()
-                Dim dataReader As SqlDataReader = command.ExecuteReader()
-                Do While dataReader.Read()
-                    'The following section is equired until access to GCD can be done to determine fixed content device path.
-                    Dim fileStoreLocation As String
-                    If (dataReader.GetString(3) = "FixedStorageArea") Then
-                        fileStoreLocation = ConfigurationManager.AppSettings(dataReader.GetGuid(1).ToString().ToUpper())
-                    Else
-                        fileStoreLocation = dataReader.GetString(2) & "\content"
-                    End If
-                    'end of section
-                    ret.Add(New FileStoreInfo() With {
-                            .FileStoreName = dataReader(0).ToString(),
-                            .FileStoreId = dataReader(1).ToString().ToUpper(),
-                            .FileStoreLocation = fileStoreLocation})
-                Loop
-            Catch ex As Exception
-                Log.Error(ex)
-                SharedExitCode = ExitCode.ERROR_DATABASE_FAILURE
-                Throw
-            End Try
-        End Using
-
-        Return ret
-    End Function
+    Private Sub SendReport(orphans As List(Of OrphanedFile), missing As List(Of MissingFile))
+        Dim Body As String = File.ReadAllText("RepCheckTemplate.html")
+        Dim OrphanText As String = "<li>" + String.Join("</li><li>", orphans.Select(Function(o) o.Path)) + "</li>"
+        Body.Replace("#orphans#", OrphanText)
+        Dim MissingText As String = "<li>" + String.Join("</li><li>", missing.Select(Function(m) m.ObjectID)) + "</li>"
+        Body.Replace("#missing#", MissingText)
+    End Sub
 End Module
