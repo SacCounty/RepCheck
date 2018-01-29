@@ -17,6 +17,7 @@ Partial Public Class RepCheckReport
     Public Property DBTime As Decimal
     Public Property FSTime As Decimal
     Public Property ProcessTime As Decimal
+    Public Property FileStoreName As String
 
     Public Overridable Property MissingFiles As ICollection(Of MissingFile) = New HashSet(Of MissingFile)
     Public Overridable Property OrphanedFiles As ICollection(Of OrphanedFile) = New HashSet(Of OrphanedFile)
