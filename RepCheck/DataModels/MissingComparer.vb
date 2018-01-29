@@ -6,6 +6,6 @@
     End Function
 
     Public Function GetHashCode(obj As MissingFile) As Integer Implements IEqualityComparer(Of MissingFile).GetHashCode
-        Throw New NotImplementedException()
+        Return obj.ObjectID.GetHashCode()
     End Function
 End Class

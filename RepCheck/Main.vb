@@ -4,9 +4,8 @@ Imports System.Collections.Concurrent
 Imports System.Data.SqlClient
 Imports System.Configuration
 Imports log4net
-
-' TODO: add FileStoreName to DB
-' TODO: Verify adding relatioship objects after the fact still works with EF6
+Imports System.Net.Mail
+Imports System.Threading
 
 Module Main
     Dim FileStoreObjDict As ConcurrentDictionary(Of Guid, String) = Nothing
@@ -18,10 +17,11 @@ Module Main
 
     Dim SharedExitCode As ExitCode = ExitCode.SUCCESS
 
-    Private Log As ILog = LogManager.GetLogger("WCFRestAppender")
+    Private Log As ILog = LogManager.GetLogger("RepCheckLogger")
 
     Function Main() As Integer
         Dim args() As String = System.Environment.GetCommandLineArgs()
+        GlobalContext.Properties("pid") = Process.GetCurrentProcess().Id
 
         Try
             Dim Options As Options = GetOptions(args)
@@ -68,14 +68,14 @@ Module Main
 
                         If (Options.ComparePrevious) Then
                             Dim PrevReport As RepCheckReport = entities.RepCheckReports.Where(
-                                Function(r) r.ObjectStoreName = Options.ObjectStoreName And "" = fs.FileStoreName And r.ReportID <> NewReport.ReportID).OrderByDescending(
+                                Function(r) r.ObjectStoreName = Options.ObjectStoreName And r.FileStoreName = fs.FileStoreName And r.ReportID <> NewReport.ReportID).OrderByDescending(
                                 Function(r) r.ReportDate).FirstOrDefault()
                             If (PrevReport IsNot Nothing) Then
                                 Dim NewOrphans As List(Of OrphanedFile) = NewReport.OrphanedFiles.Except(PrevReport.OrphanedFiles, New OrphanComparer()).ToList()
                                 Dim NewMissing As List(Of MissingFile) = NewReport.MissingFiles.Except(PrevReport.MissingFiles, New MissingComparer()).ToList()
                                 If (NewOrphans.Count > 0 Or NewMissing.Count > 0) Then
                                     Log.Info("RepCheck found " & NewOrphans.Count & " new orphans and " & NewMissing.Count & " new missing files in " & Options.ObjectStoreName & " - " & fs.FileStoreName)
-                                    SendReport(NewOrphans, NewMissing)
+                                    SendReport(Options.ObjectStoreName, fs.FileStoreName, NewOrphans, NewMissing)
                                 End If
                             Else
                                 Log.Info("No previous report for this object store and file store.")
@@ -273,6 +273,7 @@ Module Main
             Dim NewReport As RepCheckReport = New RepCheckReport() With {
                     .ReportDate = Now,
                     .ObjectStoreName = Options.ObjectStoreName,
+                    .FileStoreName = fs.FileStoreName,
                     .DBTime = dbdur,
                     .FSTime = fsdur,
                     .ProcessTime = procdur
@@ -309,12 +310,20 @@ Module Main
                 folders = folder.GetDirectories()
             Catch fex As Exception
                 If (fex.Message.Contains("Windows cannot find the network path.")) Then
+                    Log.Error("First failure to get directories for: " & folder.FullName)
+                    Thread.Sleep(60000)
                     'It is expensive to fail the entire job. Try one more time to get directories.
                     Try
                         folders = folder.GetDirectories()
                     Catch fex2 As Exception
-                        'Second error. Fail whole job
-                        exceptions.Add(fex2)
+                        'Second error. We really don't want to fail the whole job, so lets go for a three strikes scenario.
+                        Try
+                            Log.Error("second failure to get directories for: " & folder.FullName)
+                            Thread.Sleep(60000)
+                            folders = folder.GetDirectories()
+                        Catch fex3 As Exception
+                            exceptions.Add(fex3)
+                        End Try
                     End Try
                 Else
                     'Not due to latency. Fail whole job
@@ -371,11 +380,29 @@ Module Main
         End Try
     End Sub
 
-    Private Sub SendReport(orphans As List(Of OrphanedFile), missing As List(Of MissingFile))
-        Dim Body As String = File.ReadAllText("RepCheckTemplate.html")
-        Dim OrphanText As String = "<li>" + String.Join("</li><li>", orphans.Select(Function(o) o.Path)) + "</li>"
-        Body.Replace("#orphans#", OrphanText)
-        Dim MissingText As String = "<li>" + String.Join("</li><li>", missing.Select(Function(m) m.ObjectID)) + "</li>"
-        Body.Replace("#missing#", MissingText)
+    Private Sub SendReport(ObjectStoreName As String, FileStoreName As String, orphans As List(Of OrphanedFile), missing As List(Of MissingFile))
+        Try
+            Dim mailCurrent As New MailMessage("ecmnotify@saccounty.net", ConfigurationManager.AppSettings("NotificationAddress"))
+
+            Dim Body As String = File.ReadAllText("RepCheckTemplate.html")
+            Dim OrphanText As String = String.Join("</tr><tr>", orphans.Select(Function(o) "<td>File path: </td><td>" & o.Path & "</td>"))
+            Body = Body.Replace("#orphans#", OrphanText)
+            Dim MissingText As String = String.Join("</tr><tr>", missing.Select(Function(m) "<td>ObjectId: </td><td>" & m.ObjectID & "</td>"))
+            Body = Body.Replace("#missing#", MissingText)
+            Body = Body.Replace("#objectstore#", ObjectStoreName)
+            Body = Body.Replace("#filestore#", FileStoreName)
+
+            mailCurrent.IsBodyHtml = True
+            mailCurrent.Body = Body
+            mailCurrent.Subject = ConfigurationManager.AppSettings("Subject")
+
+            'Set SMTP server to localhost
+            Dim Client As New SmtpClient("inbound.saccounty.net")
+
+            Client.Send(mailCurrent)
+        Catch ex As Exception
+            Console.ForegroundColor = ConsoleColor.Red
+            Console.WriteLine("Unable to send report: " & ex.Message)
+        End Try
     End Sub
 End Module

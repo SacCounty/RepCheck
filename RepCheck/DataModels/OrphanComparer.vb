@@ -6,6 +6,6 @@
     End Function
 
     Public Function GetHashCode(obj As OrphanedFile) As Integer Implements IEqualityComparer(Of OrphanedFile).GetHashCode
-        Throw New NotImplementedException()
+        Return obj.Path.GetHashCode()
     End Function
 End Class

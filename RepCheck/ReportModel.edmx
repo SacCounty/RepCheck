@@ -4,7 +4,7 @@
   <edmx:Runtime>
     <!-- SSDL content -->
     <edmx:StorageModels>
-    <Schema Namespace="RepCheck.Store" Provider="System.Data.SqlClient" ProviderManifestToken="2012" Alias="Self" xmlns:store="http://schemas.microsoft.com/ado/2007/12/edm/EntityStoreSchemaGenerator" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm/ssdl">
+    <Schema Namespace="RepCheck.Store" Provider="System.Data.SqlClient" ProviderManifestToken="2008" Alias="Self" xmlns:store="http://schemas.microsoft.com/ado/2007/12/edm/EntityStoreSchemaGenerator" xmlns:customannotation="http://schemas.microsoft.com/ado/2013/11/edm/customannotation" xmlns="http://schemas.microsoft.com/ado/2009/11/edm/ssdl">
         <EntityType Name="MissingFile">
           <Key>
             <PropertyRef Name="MissingFileID" />
@@ -29,6 +29,7 @@
           <Property Name="ReportID" Type="int" StoreGeneratedPattern="Identity" Nullable="false" />
           <Property Name="ReportDate" Type="datetime" Nullable="false" />
           <Property Name="ObjectStoreName" Type="varchar" MaxLength="50" Nullable="false" />
+          <Property Name="FileStoreName" Type="varchar" MaxLength="50" />
           <Property Name="DBTime" Type="decimal" Precision="10" Scale="3" Nullable="false" />
           <Property Name="FSTime" Type="decimal" Precision="10" Scale="3" Nullable="false" />
           <Property Name="ProcessTime" Type="decimal" Precision="10" Scale="3" Nullable="false" />
@@ -118,6 +119,7 @@
           <Property Name="ProcessTime" Type="Decimal" Nullable="false" Precision="10" Scale="3" />
           <NavigationProperty Name="MissingFiles" Relationship="RepCheck.FK_MissingFile_RepCheckReport" FromRole="RepCheckReport" ToRole="MissingFile" />
           <NavigationProperty Name="OrphanedFiles" Relationship="RepCheck.FK_OrphanedFile_RepCheckReport" FromRole="RepCheckReport" ToRole="OrphanedFile" />
+          <Property Name="FileStoreName" Type="String" MaxLength="50" FixedLength="false" Unicode="false" />
         </EntityType>
         <Association Name="FK_MissingFile_RepCheckReport">
           <End Type="RepCheck.RepCheckReport" Role="RepCheckReport" Multiplicity="1" />
@@ -171,6 +173,7 @@
           <EntitySetMapping Name="RepCheckReports">
             <EntityTypeMapping TypeName="RepCheck.RepCheckReport">
               <MappingFragment StoreEntitySet="RepCheckReport">
+                <ScalarProperty Name="FileStoreName" ColumnName="FileStoreName" />
                 <ScalarProperty Name="ProcessTime" ColumnName="ProcessTime" />
                 <ScalarProperty Name="FSTime" ColumnName="FSTime" />
                 <ScalarProperty Name="DBTime" ColumnName="DBTime" />
