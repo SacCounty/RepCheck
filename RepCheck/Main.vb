@@ -216,7 +216,10 @@ Module Main
 
                                               'Get all relevant doc GUIDs as fast as possible
                                               Using connection As New SqlConnection(connectionString)
-                                                  Dim command As New SqlCommand("select dv.object_id from docversion dv where dv.version_status <> 3 and (dv.storage_area_id = '" & fs.FileStoreId & "' or dv.storage_location = 'FNFS:/{" & fs.FileStoreId & "}')", connection)
+                                                  Dim command As New SqlCommand("SELECT dv.object_id FROM docversion dv WHERE dv.version_status <> 3 AND " &
+                                                                                "(NOT (content_size=-1 AND mime_type='application/x-filenet-external')) AND " &
+                                                                                "(NOT (content_size Is null AND mime_type Is null)) AND (dv.storage_area_id = '" &
+                                                                                fs.FileStoreId & "' OR dv.storage_location = 'FNFS:/{" & fs.FileStoreId & "}')", connection)
                                                   Try
                                                       connection.Open()
                                                       Dim dataReader As SqlDataReader = command.ExecuteReader()
@@ -388,13 +391,11 @@ Module Main
             Dim OrphanText As String = String.Join("</tr><tr>", orphans.Select(Function(o) "<td>File path: </td><td>" & o.Path & "</td>"))
             Body = Body.Replace("#orphans#", OrphanText)
             Dim MissingText As String = String.Join("</tr><tr>", missing.Select(Function(m) "<td>ObjectId: </td><td>" & m.ObjectID & "</td>"))
-            Body = Body.Replace("#missing#", MissingText)
-            Body = Body.Replace("#objectstore#", ObjectStoreName)
-            Body = Body.Replace("#filestore#", FileStoreName)
+            Body = Body.Replace("#missing#", MissingText).Replace("#objectstore#", ObjectStoreName).Replace("#filestore#", FileStoreName)
 
             mailCurrent.IsBodyHtml = True
             mailCurrent.Body = Body
-            mailCurrent.Subject = ConfigurationManager.AppSettings("Subject")
+            mailCurrent.Subject = ConfigurationManager.AppSettings("Subject").Replace("#objectstore#", ObjectStoreName).Replace("#filestore#", FileStoreName)
 
             'Set SMTP server to localhost
             Dim Client As New SmtpClient("inbound.saccounty.net")
